@@ -10,15 +10,25 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', 1);
 app.use(helmet());
 
-const allowedOrigins = (process.env.FRONTEND_URL || '').split(',').map(s => s.trim()).filter(Boolean);
+// Parse allowed origins from env (comma-separated)
+const allowedOrigins = (process.env.FRONTEND_URL || '')
+  .split(',').map(s => s.trim().replace(/\/$/, '')).filter(Boolean);
+
 app.use(cors({
   origin: function(origin, cb) {
-    if (!origin && process.env.NODE_ENV !== 'production') return cb(null, true);
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return cb(null, true);
+    // Normalize origin (remove trailing slash)
+    const norm = origin.replace(/\/$/, '');
+    if (allowedOrigins.includes(norm)) return cb(null, true);
+    // In development, allow all
+    if (process.env.NODE_ENV !== 'production') return cb(null, true);
+    console.error('CORS blocked:', origin, '| Allowed:', allowedOrigins);
     cb(new Error('Not allowed by CORS'));
   },
   methods: ['GET','POST','PUT','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization'],
+  credentials: false,
 }));
 
 app.use(express.json({ limit: '50kb' }));
