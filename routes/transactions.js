@@ -35,6 +35,96 @@ router.get('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Gagal memuat transaksi.' }); }
 });
 
+router.post('/auto-process', async (req, res) => {
+  try {
+    const today = req.body.today || new Date(Date.now() + 7 * 3600000).toISOString().split('T')[0];
+    const r = await query(
+      `SELECT * FROM transactions
+       WHERE user_id = $1 AND type IN ('calon_pemasukan', 'calon_pengeluaran')
+       AND date <= $2`,
+      [req.user.id, today]
+    );
+
+    let processedCount = 0;
+    
+    const formatDate = (d) => {
+      const dt = new Date(d);
+      return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+    };
+
+    for (let t of r.rows) {
+      const actualType = t.type === 'calon_pemasukan' ? 'pemasukan' : 'pengeluaran';
+      let currentFormatDate = formatDate(t.date);
+      
+      let iters = 0;
+      let deleteIt = false;
+      let nextCntStr = t.cnt;
+
+      while (currentFormatDate <= today && iters < 100) {
+        iters++;
+        // Insert actual
+        let newNote = t.note ? t.note + ' (Auto)' : '(Auto)';
+        await query(
+          `INSERT INTO transactions (description, amt, type, cat, date, note, acc_id, user_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [t.description, t.amt, actualType, t.cat, currentFormatDate, newNote, t.acc_id, req.user.id]
+        );
+        processedCount++;
+
+        if (!t.rec) {
+          deleteIt = true;
+          break; // One time
+        } else {
+          // calculate next date
+          const dt = new Date(currentFormatDate);
+          if (t.freq === 'monthly') dt.setMonth(dt.getMonth() + 1);
+          else if (t.freq === 'weekly') dt.setDate(dt.getDate() + 7);
+          else if (t.freq === 'biweekly') dt.setDate(dt.getDate() + 14);
+          else if (t.freq === 'yearly') dt.setFullYear(dt.getFullYear() + 1);
+          else if (t.freq === 'daily') dt.setDate(dt.getDate() + 1);
+          else { deleteIt = true; break; } // safety fallback
+
+          currentFormatDate = formatDate(dt);
+
+          if (t.end_date) {
+            const ed = formatDate(t.end_date);
+            if (currentFormatDate > ed) {
+              deleteIt = true;
+              break;
+            }
+          }
+
+          if (nextCntStr) {
+            const c = parseInt(nextCntStr, 10);
+            if (!isNaN(c)) {
+              if (c <= 1) {
+                deleteIt = true;
+                break;
+              } else {
+                nextCntStr = (c - 1).toString();
+              }
+            }
+          }
+        }
+      }
+
+      if (deleteIt) {
+        await query(`DELETE FROM transactions WHERE id = $1`, [t.id]);
+      } else {
+        await query(
+          `UPDATE transactions SET date = $1, cnt = $2 WHERE id = $3`,
+          [currentFormatDate, nextCntStr, t.id]
+        );
+      }
+    }
+
+    res.json({ success: true, processed: processedCount });
+  } catch (e) {
+    console.error('Auto-process error:', e);
+    res.status(500).json({ error: 'Gagal memproses proyeksi otomatis.' });
+  }
+});
+
 router.post('/', rules, async (req, res) => {
   const err = validationResult(req);
   if (!err.isEmpty()) return res.status(422).json({ error: err.array()[0].msg });
