@@ -36,7 +36,7 @@ app.use(express.urlencoded({ extended: false, limit: '50kb' }));
 
 app.use(rateLimit({
   windowMs: 60 * 1000, max: 100,
-  message: { error: 'Too many requests. Try again in 1 minute.' },
+  message: { error: 'Terlalu banyak request. Coba lagi dalam 1 menit.' },
   standardHeaders: true, legacyHeaders: false,
 }));
 
@@ -46,10 +46,10 @@ app.use('/api/transactions', require('./routes/transactions'));
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: Date.now() }));
 
-app.use((_req, res) => res.status(404).json({ error: 'Endpoint not found.' }));
+app.use((_req, res) => res.status(404).json({ error: 'Endpoint tidak ditemukan.' }));
 app.use((err, _req, res, _next) => {
   console.error(err);
-  res.status(500).json({ error: 'Internal server error.' });
+  res.status(500).json({ error: 'Terjadi kesalahan server.' });
 });
 
 app.listen(PORT, () => console.log(`FinTrack API running on port ${PORT}`));
