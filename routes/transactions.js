@@ -10,11 +10,11 @@ const TYPES = ['pemasukan','pengeluaran','calon_pemasukan','calon_pengeluaran'];
 const FREQS = ['daily','weekly','biweekly','monthly','yearly'];
 
 const rules = [
-  body('desc').trim().notEmpty().withMessage('Deskripsi wajib diisi.').isLength({ max: 200 }).escape(),
-  body('amt').isFloat({ min: 0.01 }).withMessage('Jumlah harus lebih dari 0.'),
-  body('type').isIn(TYPES).withMessage('Tipe tidak valid.'),
-  body('cat').trim().notEmpty().withMessage('Kategori wajib diisi.').isLength({ max: 100 }).escape(),
-  body('date').isDate().withMessage('Format tanggal tidak valid.'),
+  body('desc').trim().notEmpty().withMessage('Description is required.').isLength({ max: 200 }).escape(),
+  body('amt').isFloat({ min: 0.01 }).withMessage('Amount must be greater than 0.'),
+  body('type').isIn(TYPES).withMessage('Invalid type.'),
+  body('cat').trim().notEmpty().withMessage('Category is required.').isLength({ max: 100 }).escape(),
+  body('date').isDate().withMessage('Invalid date format.'),
   body('note').optional().trim().isLength({ max: 500 }).escape(),
   body('acc_id').optional({ nullable: true }).isInt({ min: 1 }),
   body('rec').optional().isBoolean(),
@@ -32,7 +32,7 @@ router.get('/', async (req, res) => {
       [req.user.id]
     );
     res.json(r.rows);
-  } catch (e) { res.status(500).json({ error: 'Gagal memuat transaksi.' }); }
+  } catch (e) { res.status(500).json({ error: 'Failed to load transactions.' }); }
 });
 
 router.post('/auto-process', async (req, res) => {
@@ -121,7 +121,7 @@ router.post('/auto-process', async (req, res) => {
     res.json({ success: true, processed: processedCount });
   } catch (e) {
     console.error('Auto-process error:', e);
-    res.status(500).json({ error: 'Gagal memproses proyeksi otomatis.' });
+    res.status(500).json({ error: 'Failed to auto-process projections.' });
   }
 });
 
@@ -131,7 +131,7 @@ router.post('/', rules, async (req, res) => {
   const { desc, amt, type, cat, date, note, acc_id, rec, freq, cnt, end_date } = req.body;
   if (acc_id) {
     const chk = await query('SELECT id FROM accounts WHERE id=$1 AND user_id=$2', [acc_id, req.user.id]);
-    if (!chk.rows.length) return res.status(403).json({ error: 'Akun tidak ditemukan.' });
+    if (!chk.rows.length) return res.status(403).json({ error: 'Account not found.' });
   }
   try {
     const r = await query(
@@ -140,7 +140,7 @@ router.post('/', rules, async (req, res) => {
       [desc, parseFloat(amt), type, cat, date, note||null, acc_id||null, !!rec, freq||null, cnt||null, end_date||null, req.user.id]
     );
     res.status(201).json(r.rows[0]);
-  } catch (e) { res.status(500).json({ error: 'Gagal menyimpan transaksi.' }); }
+  } catch (e) { res.status(500).json({ error: 'Failed to save transaction.' }); }
 });
 
 router.put('/:id', [param('id').isInt(), ...rules], async (req, res) => {
@@ -149,7 +149,7 @@ router.put('/:id', [param('id').isInt(), ...rules], async (req, res) => {
   const { desc, amt, type, cat, date, note, acc_id, rec, freq, cnt, end_date } = req.body;
   if (acc_id) {
     const chk = await query('SELECT id FROM accounts WHERE id=$1 AND user_id=$2', [acc_id, req.user.id]);
-    if (!chk.rows.length) return res.status(403).json({ error: 'Akun tidak ditemukan.' });
+    if (!chk.rows.length) return res.status(403).json({ error: 'Account not found.' });
   }
   try {
     const r = await query(
@@ -159,20 +159,20 @@ router.put('/:id', [param('id').isInt(), ...rules], async (req, res) => {
       [desc, parseFloat(amt), type, cat, date, note||null, acc_id||null, !!rec,
        freq||null, cnt||null, end_date||null, parseInt(req.params.id), req.user.id]
     );
-    if (!r.rows.length) return res.status(404).json({ error: 'Transaksi tidak ditemukan.' });
+    if (!r.rows.length) return res.status(404).json({ error: 'Transaction not found.' });
     res.json(r.rows[0]);
-  } catch (e) { res.status(500).json({ error: 'Gagal memperbarui transaksi.' }); }
+  } catch (e) { res.status(500).json({ error: 'Failed to update transaction.' }); }
 });
 
 router.delete('/:id', param('id').isInt(), async (req, res) => {
   const err = validationResult(req);
-  if (!err.isEmpty()) return res.status(422).json({ error: 'ID tidak valid.' });
+  if (!err.isEmpty()) return res.status(422).json({ error: 'Invalid ID.' });
   try {
     const r = await query('DELETE FROM transactions WHERE id=$1 AND user_id=$2 RETURNING id',
       [parseInt(req.params.id), req.user.id]);
-    if (!r.rows.length) return res.status(404).json({ error: 'Transaksi tidak ditemukan.' });
+    if (!r.rows.length) return res.status(404).json({ error: 'Transaction not found.' });
     res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: 'Gagal menghapus transaksi.' }); }
+  } catch (e) { res.status(500).json({ error: 'Failed to delete transaction.' }); }
 });
 
 module.exports = router;

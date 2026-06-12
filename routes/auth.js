@@ -10,16 +10,16 @@ const router = express.Router();
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 10,
-  message: { error: 'Terlalu banyak percobaan. Coba lagi 15 menit lagi.' },
+  message: { error: 'Too many attempts. Try again in 15 minutes.' },
   standardHeaders: true, legacyHeaders: false,
 });
 
 const registerRules = [
-  body('email').isEmail().withMessage('Format email tidak valid.').normalizeEmail(),
+  body('email').isEmail().withMessage('Invalid email format.').normalizeEmail(),
   body('password')
-    .isLength({ min: 8 }).withMessage('Password minimal 8 karakter.')
-    .matches(/[A-Z]/).withMessage('Password harus mengandung huruf kapital.')
-    .matches(/[0-9]/).withMessage('Password harus mengandung angka.'),
+    .isLength({ min: 8 }).withMessage('Password must be at least 8 characters.')
+    .matches(/[A-Z]/).withMessage('Password must contain a capital letter.')
+    .matches(/[0-9]/).withMessage('Password must contain a number.'),
 ];
 const loginRules = [
   body('email').isEmail().normalizeEmail(),
@@ -39,7 +39,7 @@ router.post('/register', authLimiter, registerRules, async (req, res) => {
   const { email, password } = req.body;
   try {
     const existing = await query('SELECT id FROM users WHERE email = $1', [email]);
-    if (existing.rows.length) return res.status(409).json({ error: 'Email sudah terdaftar.' });
+    if (existing.rows.length) return res.status(409).json({ error: 'Email is already registered.' });
 
     const hash = await bcrypt.hash(password, 12);
     const result = await query(
@@ -50,7 +50,7 @@ router.post('/register', authLimiter, registerRules, async (req, res) => {
     return res.status(201).json({ token: signToken(user), user: { id: user.id, email: user.email } });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: 'Terjadi kesalahan server.' });
+    return res.status(500).json({ error: 'Internal server error.' });
   }
 });
 
@@ -64,12 +64,12 @@ router.post('/login', authLimiter, loginRules, async (req, res) => {
     const dummy = '$2a$12$dummyhashtopreventtimingattacksxxx';
     const valid = await bcrypt.compare(password, user ? user.password_hash : dummy);
     if (!user || !valid)
-      return res.status(401).json({ error: 'Email atau password salah.' });
+      return res.status(401).json({ error: 'Invalid email or password.' });
 
     return res.json({ token: signToken(user), user: { id: user.id, email: user.email } });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: 'Terjadi kesalahan server.' });
+    return res.status(500).json({ error: 'Internal server error.' });
   }
 });
 
@@ -77,10 +77,10 @@ router.post('/login', authLimiter, loginRules, async (req, res) => {
 router.get('/me', requireAuth, async (req, res) => {
   try {
     const result = await query('SELECT id, email, created_at FROM users WHERE id = $1', [req.user.id]);
-    if (!result.rows.length) return res.status(404).json({ error: 'User tidak ditemukan.' });
+    if (!result.rows.length) return res.status(404).json({ error: 'User not found.' });
     return res.json({ user: result.rows[0] });
   } catch (err) {
-    return res.status(500).json({ error: 'Terjadi kesalahan server.' });
+    return res.status(500).json({ error: 'Internal server error.' });
   }
 });
 
