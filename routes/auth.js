@@ -7,6 +7,7 @@ const rateLimit = require('express-rate-limit');
 const { query } = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { sendOTPEmail } = require('../services/email');
+const { encryptDeterministic, decryptDeterministic } = require('../services/encryption');
 
 const router = express.Router();
 
@@ -58,7 +59,8 @@ router.post('/register', authLimiter, registerRules, async (req, res) => {
 
   const { email, password } = req.body;
   try {
-    const existing = await query('SELECT id FROM users WHERE email = $1', [email]);
+    const encryptedEmail = encryptDeterministic(email);
+    const existing = await query('SELECT id FROM users WHERE email = $1', [encryptedEmail]);
     if (existing.rows.length) return res.status(409).json({ error: 'Email sudah terdaftar.' });
 
     const hash = await bcrypt.hash(password, 12);
@@ -68,9 +70,10 @@ router.post('/register', authLimiter, registerRules, async (req, res) => {
     // We assume the db_migrations.sql has been run
     const result = await query(
       'INSERT INTO users (email, password_hash, otp_code, otp_expires_at) VALUES ($1, $2, $3, $4) RETURNING id, email',
-      [email, hash, otpCode, otpExpires]
+      [encryptedEmail, hash, otpCode, otpExpires]
     );
     const user = result.rows[0];
+    if (user) user.email = decryptDeterministic(user.email);
     
     // Send email (await it so Vercel doesn't freeze the container before logging)
     await sendOTPEmail(email, otpCode).catch(err => console.error('Failed to send OTP:', err));
@@ -124,6 +127,7 @@ router.post('/set-pin', async (req, res) => {
     
     // Full login success!
     const user = result.rows[0];
+    if (user) user.email = decryptDeterministic(user.email);
     return res.json({ token: signToken(user), user: { id: user.id, email: user.email }, message: 'Registration complete' });
   } catch (err) {
     console.error(err);
@@ -135,8 +139,10 @@ router.post('/set-pin', async (req, res) => {
 router.post('/login', authLimiter, loginRules, async (req, res) => {
   const { email, password } = req.body;
   try {
-    const result = await query('SELECT id, email, password_hash, is_verified, pin_hash FROM users WHERE email = $1', [email]);
+    const encryptedEmail = encryptDeterministic(email);
+    const result = await query('SELECT id, email, password_hash, is_verified, pin_hash FROM users WHERE email = $1', [encryptedEmail]);
     const user = result.rows[0];
+    if (user) user.email = decryptDeterministic(user.email);
     const dummy = '$2a$12$dummyhashtopreventtimingattacksxxx';
     const valid = await bcrypt.compare(password, user ? user.password_hash : dummy);
     if (!user || !valid)
@@ -176,6 +182,7 @@ router.post('/verify-pin', authLimiter, async (req, res) => {
     const result = await query('SELECT id, email, pin_hash FROM users WHERE id = $1', [decoded.id]);
     const user = result.rows[0];
     if (!user) return res.status(404).json({ error: 'User tidak ditemukan.' });
+    if (user) user.email = decryptDeterministic(user.email);
     
     const valid = await bcrypt.compare(pin, user.pin_hash);
     if (!valid) return res.status(401).json({ error: 'PIN salah.' });
@@ -192,7 +199,9 @@ router.get('/me', requireAuth, async (req, res) => {
   try {
     const result = await query('SELECT id, email, created_at FROM users WHERE id = $1', [req.user.id]);
     if (!result.rows.length) return res.status(404).json({ error: 'User tidak ditemukan.' });
-    return res.json({ user: result.rows[0] });
+    const user = result.rows[0];
+    if (user) user.email = decryptDeterministic(user.email);
+    return res.json({ user });
   } catch (err) {
     return res.status(500).json({ error: 'Terjadi kesalahan server.' });
   }

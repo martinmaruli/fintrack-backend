@@ -2,12 +2,21 @@ const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const { query } = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { encrypt, decrypt } = require('../services/encryption');
 
 const router = express.Router();
 router.use(requireAuth);
 
 const TYPES = ['pemasukan','pengeluaran','calon_pemasukan','calon_pengeluaran'];
 const FREQS = ['monthly'];
+
+function decryptRow(row) {
+  if (row.description) row.description = decrypt(row.description);
+  if (row.cat) row.cat = decrypt(row.cat);
+  if (row.note) row.note = decrypt(row.note);
+  if (row.account_name) row.account_name = decrypt(row.account_name);
+  return row;
+}
 
 const rules = [
   body('desc').trim().notEmpty().withMessage('Deskripsi wajib diisi.').isLength({ max: 200 }).escape(),
@@ -38,7 +47,7 @@ router.get('/', async (req, res) => {
        WHERE t.user_id = $1 ORDER BY t.date DESC, t.id DESC`,
       [req.user.id]
     );
-    res.json(r.rows);
+    res.json(r.rows.map(decryptRow));
   } catch (e) { res.status(500).json({ error: 'Gagal memuat transaksi.' }); }
 });
 
@@ -69,7 +78,7 @@ router.get('/dashboard', async (req, res) => {
        WHERE t.user_id = $1 ORDER BY t.date DESC, t.id DESC LIMIT 50`,
       [req.user.id]
     );
-    res.json(r.rows);
+    res.json(r.rows.map(decryptRow));
   } catch (e) { res.status(500).json({ error: 'Gagal memuat dashboard.' }); }
 });
 
@@ -81,7 +90,7 @@ router.get('/income', async (req, res) => {
        WHERE t.user_id = $1 AND t.type = 'pemasukan' ORDER BY t.date DESC, t.id DESC`,
       [req.user.id]
     );
-    res.json(r.rows);
+    res.json(r.rows.map(decryptRow));
   } catch (e) { res.status(500).json({ error: 'Gagal memuat income.' }); }
 });
 
@@ -93,7 +102,7 @@ router.get('/outcome', async (req, res) => {
        WHERE t.user_id = $1 AND t.type = 'pengeluaran' ORDER BY t.date DESC, t.id DESC`,
       [req.user.id]
     );
-    res.json(r.rows);
+    res.json(r.rows.map(decryptRow));
   } catch (e) { res.status(500).json({ error: 'Gagal memuat outcome.' }); }
 });
 
@@ -105,7 +114,7 @@ router.get('/projected-income', async (req, res) => {
        WHERE t.user_id = $1 AND t.type = 'calon_pemasukan' ORDER BY t.date DESC, t.id DESC`,
       [req.user.id]
     );
-    res.json(r.rows);
+    res.json(r.rows.map(decryptRow));
   } catch (e) { res.status(500).json({ error: 'Gagal memuat projected income.' }); }
 });
 
@@ -117,7 +126,7 @@ router.get('/projected-outcome', async (req, res) => {
        WHERE t.user_id = $1 AND t.type = 'calon_pengeluaran' ORDER BY t.date DESC, t.id DESC`,
       [req.user.id]
     );
-    res.json(r.rows);
+    res.json(r.rows.map(decryptRow));
   } catch (e) { res.status(500).json({ error: 'Gagal memuat projected outcome.' }); }
 });
 
@@ -129,7 +138,7 @@ router.get('/report', async (req, res) => {
        WHERE t.user_id = $1 ORDER BY t.date DESC, t.id DESC`,
       [req.user.id]
     );
-    res.json(r.rows);
+    res.json(r.rows.map(decryptRow));
   } catch (e) { res.status(500).json({ error: 'Gagal memuat report.' }); }
 });
 
@@ -160,16 +169,17 @@ router.post('/auto-process', async (req, res) => {
 
       while (currentFormatDate <= today && iters < 100) {
         iters++;
-        let isPaused = t.note && t.note.includes('[PAUSED]');
-        let isStopped = t.note && t.note.includes('[STOPPED]');
+        let decryptedNote = decrypt(t.note);
+        let isPaused = decryptedNote && decryptedNote.includes('[PAUSED]');
+        let isStopped = decryptedNote && decryptedNote.includes('[STOPPED]');
 
         if (!isPaused && !isStopped) {
           // Insert actual
-          let newNote = t.note ? t.note + ' (Auto)' : '(Auto)';
+          let newNote = decryptedNote ? decryptedNote + ' (Auto)' : '(Auto)';
           await query(
             `INSERT INTO transactions (description, amt, type, cat, date, note, acc_id, user_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [t.description, t.amt, actualType, t.cat, currentFormatDate, newNote, t.acc_id, req.user.id]
+            [encrypt(decrypt(t.description)), t.amt, actualType, encrypt(decrypt(t.cat)), currentFormatDate, encrypt(newNote), t.acc_id, req.user.id]
           );
           processedCount++;
         }
@@ -237,9 +247,9 @@ router.post('/', rules, async (req, res) => {
     const r = await query(
       `INSERT INTO transactions (description,amt,type,cat,date,note,acc_id,rec,freq,cnt,end_date,user_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [desc, parseFloat(amt), type, cat, date, note||null, acc_id||null, !!rec, freq||null, cnt||null, end_date||null, req.user.id]
+      [encrypt(desc), parseFloat(amt), type, encrypt(cat), date, note ? encrypt(note) : null, acc_id||null, !!rec, freq||null, cnt||null, end_date||null, req.user.id]
     );
-    res.status(201).json(r.rows[0]);
+    res.status(201).json(decryptRow(r.rows[0]));
   } catch (e) { res.status(500).json({ error: 'Gagal menyimpan transaksi.' }); }
 });
 
@@ -256,11 +266,11 @@ router.put('/:id', [param('id').isInt(), ...rules], async (req, res) => {
       `UPDATE transactions SET description=$1,amt=$2,type=$3,cat=$4,date=$5,
        note=$6,acc_id=$7,rec=$8,freq=$9,cnt=$10,end_date=$11
        WHERE id=$12 AND user_id=$13 RETURNING *`,
-      [desc, parseFloat(amt), type, cat, date, note||null, acc_id||null, !!rec,
+      [encrypt(desc), parseFloat(amt), type, encrypt(cat), date, note ? encrypt(note) : null, acc_id||null, !!rec,
        freq||null, cnt||null, end_date||null, parseInt(req.params.id), req.user.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Transaksi tidak ditemukan.' });
-    res.json(r.rows[0]);
+    res.json(decryptRow(r.rows[0]));
   } catch (e) { res.status(500).json({ error: 'Gagal memperbarui transaksi.' }); }
 });
 
