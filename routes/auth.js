@@ -72,8 +72,8 @@ router.post('/register', authLimiter, registerRules, async (req, res) => {
     );
     const user = result.rows[0];
     
-    // Send email (async, we don't wait for it to finish unless we want to handle errors)
-    sendOTPEmail(email, otpCode).catch(err => console.error('Failed to send OTP:', err));
+    // Send email (await it so Vercel doesn't freeze the container before logging)
+    await sendOTPEmail(email, otpCode).catch(err => console.error('Failed to send OTP:', err));
     
     // Return temp token for OTP verification step
     return res.status(201).json({ temp_token: signTempToken(user.id, 'otp'), message: 'OTP sent to email' });
@@ -147,7 +147,7 @@ router.post('/login', authLimiter, loginRules, async (req, res) => {
       const otpCode = generateOTP();
       const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
       await query('UPDATE users SET otp_code = $1, otp_expires_at = $2 WHERE id = $3', [otpCode, otpExpires, user.id]);
-      sendOTPEmail(email, otpCode).catch(err => console.error('Failed to send OTP:', err));
+      await sendOTPEmail(email, otpCode).catch(err => console.error('Failed to send OTP:', err));
       return res.status(403).json({ error: 'Email belum diverifikasi. Cek email untuk OTP baru.', temp_token: signTempToken(user.id, 'otp'), requires_otp: true });
     }
     
