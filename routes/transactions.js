@@ -7,7 +7,7 @@ const router = express.Router();
 router.use(requireAuth);
 
 const TYPES = ['pemasukan','pengeluaran','calon_pemasukan','calon_pengeluaran'];
-const FREQS = ['daily','weekly','biweekly','monthly','yearly','minutes'];
+const FREQS = ['monthly'];
 
 const rules = [
   body('desc').trim().notEmpty().withMessage('Deskripsi wajib diisi.').isLength({ max: 200 }).escape(),
@@ -18,7 +18,14 @@ const rules = [
   body('note').optional().trim().isLength({ max: 500 }).escape(),
   body('acc_id').optional({ nullable: true }).isInt({ min: 1 }),
   body('rec').optional().isBoolean(),
-  body('freq').optional({ nullable: true }).isIn([null, ...FREQS]),
+  body('freq').optional({ nullable: true }).custom(value => {
+    if (value === null || value === 'monthly') return true;
+    if (/^custom_\d+$/.test(value)) {
+      const days = parseInt(value.split('_')[1]);
+      if (days > 0) return true;
+    }
+    throw new Error('Frekuensi tidak valid.');
+  }),
   body('cnt').optional({ nullable: true }).isLength({ max: 10 }),
   body('end_date').optional({ nullable: true }).isISO8601(),
 ];
@@ -62,14 +69,19 @@ router.post('/auto-process', async (req, res) => {
 
       while (currentFormatDate <= today && iters < 100) {
         iters++;
-        // Insert actual
-        let newNote = t.note ? t.note + ' (Auto)' : '(Auto)';
-        await query(
-          `INSERT INTO transactions (description, amt, type, cat, date, note, acc_id, user_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [t.description, t.amt, actualType, t.cat, currentFormatDate, newNote, t.acc_id, req.user.id]
-        );
-        processedCount++;
+        let isPaused = t.note && t.note.includes('[PAUSED]');
+        let isStopped = t.note && t.note.includes('[STOPPED]');
+
+        if (!isPaused && !isStopped) {
+          // Insert actual
+          let newNote = t.note ? t.note + ' (Auto)' : '(Auto)';
+          await query(
+            `INSERT INTO transactions (description, amt, type, cat, date, note, acc_id, user_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [t.description, t.amt, actualType, t.cat, currentFormatDate, newNote, t.acc_id, req.user.id]
+          );
+          processedCount++;
+        }
 
         if (!t.rec) {
           deleteIt = true;
@@ -78,11 +90,7 @@ router.post('/auto-process', async (req, res) => {
           // calculate next date
           const dt = new Date(currentFormatDate);
           if (t.freq === 'monthly') dt.setMonth(dt.getMonth() + 1);
-          else if (t.freq === 'weekly') dt.setDate(dt.getDate() + 7);
-          else if (t.freq === 'biweekly') dt.setDate(dt.getDate() + 14);
-          else if (t.freq === 'yearly') dt.setFullYear(dt.getFullYear() + 1);
-          else if (t.freq === 'daily') dt.setDate(dt.getDate() + 1);
-          else if (t.freq === 'minutes') dt.setMinutes(dt.getMinutes() + 1);
+          else if (t.freq && t.freq.startsWith('custom_')) dt.setDate(dt.getDate() + parseInt(t.freq.split('_')[1]));
           else { deleteIt = true; break; } // safety fallback
 
           currentFormatDate = formatDate(dt);
