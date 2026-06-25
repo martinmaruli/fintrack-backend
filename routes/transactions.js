@@ -43,6 +43,24 @@ router.get('/', async (req, res) => {
 });
 
 // New menu-specific API routes
+router.get('/summary', async (req, res) => {
+  try {
+    const r = await query(`SELECT type, SUM(amt) as total FROM transactions WHERE user_id = $1 GROUP BY type`, [req.user.id]);
+    const sums = { pemasukan: 0, pengeluaran: 0, calon_pemasukan: 0, calon_pengeluaran: 0 };
+    r.rows.forEach(row => { sums[row.type] = parseFloat(row.total) || 0; });
+    const accR = await query(`SELECT SUM(init) as total_init FROM accounts WHERE user_id = $1`, [req.user.id]);
+    const initBal = parseFloat(accR.rows[0]?.total_init) || 0;
+    res.json({
+      income: sums.pemasukan,
+      expense: sums.pengeluaran,
+      projected_income: sums.calon_pemasukan,
+      projected_expense: sums.calon_pengeluaran,
+      balance: initBal + sums.pemasukan - sums.pengeluaran,
+      projected_balance: (initBal + sums.pemasukan - sums.pengeluaran) + sums.calon_pemasukan - sums.calon_pengeluaran
+    });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Gagal memuat summary.' }); }
+});
+
 router.get('/dashboard', async (req, res) => {
   try {
     const r = await query(
