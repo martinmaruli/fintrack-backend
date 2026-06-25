@@ -2,7 +2,7 @@ const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const { query } = require('../db');
 const { requireAuth } = require('../middleware/auth');
-const { encrypt, decrypt } = require('../services/encryption');
+const { encrypt, decrypt, encryptDeterministic, decryptDeterministic } = require('../services/encryption');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -15,6 +15,7 @@ function decryptRow(row) {
   if (row.cat) row.cat = decrypt(row.cat);
   if (row.note) row.note = decrypt(row.note);
   if (row.account_name) row.account_name = decrypt(row.account_name);
+  if (row.type) row.type = decryptDeterministic(row.type);
   return row;
 }
 
@@ -56,7 +57,10 @@ router.get('/summary', async (req, res) => {
   try {
     const r = await query(`SELECT type, SUM(amt) as total FROM transactions WHERE user_id = $1 GROUP BY type`, [req.user.id]);
     const sums = { pemasukan: 0, pengeluaran: 0, calon_pemasukan: 0, calon_pengeluaran: 0 };
-    r.rows.forEach(row => { sums[row.type] = parseFloat(row.total) || 0; });
+    r.rows.forEach(row => {
+      const dt = decryptDeterministic(row.type);
+      sums[dt] = parseFloat(row.total) || 0;
+    });
     const accR = await query(`SELECT SUM(init) as total_init FROM accounts WHERE user_id = $1`, [req.user.id]);
     const initBal = parseFloat(accR.rows[0]?.total_init) || 0;
     res.json({
@@ -87,8 +91,8 @@ router.get('/income', async (req, res) => {
     const r = await query(
       `SELECT t.*, a.name AS account_name FROM transactions t
        LEFT JOIN accounts a ON t.acc_id = a.id AND a.user_id = $1
-       WHERE t.user_id = $1 AND t.type = 'pemasukan' ORDER BY t.date DESC, t.id DESC`,
-      [req.user.id]
+       WHERE t.user_id = $1 AND t.type = $2 ORDER BY t.date DESC, t.id DESC`,
+      [req.user.id, encryptDeterministic('pemasukan')]
     );
     res.json(r.rows.map(decryptRow));
   } catch (e) { res.status(500).json({ error: 'Gagal memuat income.' }); }
@@ -99,8 +103,8 @@ router.get('/outcome', async (req, res) => {
     const r = await query(
       `SELECT t.*, a.name AS account_name FROM transactions t
        LEFT JOIN accounts a ON t.acc_id = a.id AND a.user_id = $1
-       WHERE t.user_id = $1 AND t.type = 'pengeluaran' ORDER BY t.date DESC, t.id DESC`,
-      [req.user.id]
+       WHERE t.user_id = $1 AND t.type = $2 ORDER BY t.date DESC, t.id DESC`,
+      [req.user.id, encryptDeterministic('pengeluaran')]
     );
     res.json(r.rows.map(decryptRow));
   } catch (e) { res.status(500).json({ error: 'Gagal memuat outcome.' }); }
@@ -111,8 +115,8 @@ router.get('/projected-income', async (req, res) => {
     const r = await query(
       `SELECT t.*, a.name AS account_name FROM transactions t
        LEFT JOIN accounts a ON t.acc_id = a.id AND a.user_id = $1
-       WHERE t.user_id = $1 AND t.type = 'calon_pemasukan' ORDER BY t.date DESC, t.id DESC`,
-      [req.user.id]
+       WHERE t.user_id = $1 AND t.type = $2 ORDER BY t.date DESC, t.id DESC`,
+      [req.user.id, encryptDeterministic('calon_pemasukan')]
     );
     res.json(r.rows.map(decryptRow));
   } catch (e) { res.status(500).json({ error: 'Gagal memuat projected income.' }); }
@@ -123,8 +127,8 @@ router.get('/projected-outcome', async (req, res) => {
     const r = await query(
       `SELECT t.*, a.name AS account_name FROM transactions t
        LEFT JOIN accounts a ON t.acc_id = a.id AND a.user_id = $1
-       WHERE t.user_id = $1 AND t.type = 'calon_pengeluaran' ORDER BY t.date DESC, t.id DESC`,
-      [req.user.id]
+       WHERE t.user_id = $1 AND t.type = $2 ORDER BY t.date DESC, t.id DESC`,
+      [req.user.id, encryptDeterministic('calon_pengeluaran')]
     );
     res.json(r.rows.map(decryptRow));
   } catch (e) { res.status(500).json({ error: 'Gagal memuat projected outcome.' }); }
@@ -147,9 +151,9 @@ router.post('/auto-process', async (req, res) => {
     const today = req.body.today || new Date(Date.now() + 7 * 3600000).toISOString().split('T')[0];
     const r = await query(
       `SELECT * FROM transactions
-       WHERE user_id = $1 AND type IN ('calon_pemasukan', 'calon_pengeluaran')
-       AND date <= $2`,
-      [req.user.id, today]
+       WHERE user_id = $1 AND type IN ($2, $3)
+       AND date <= $4`,
+      [req.user.id, encryptDeterministic('calon_pemasukan'), encryptDeterministic('calon_pengeluaran'), today]
     );
 
     let processedCount = 0;
@@ -160,7 +164,7 @@ router.post('/auto-process', async (req, res) => {
     };
 
     for (let t of r.rows) {
-      const actualType = t.type === 'calon_pemasukan' ? 'pemasukan' : 'pengeluaran';
+      const actualType = decryptDeterministic(t.type) === 'calon_pemasukan' ? 'pemasukan' : 'pengeluaran';
       let currentFormatDate = formatDate(t.date);
       
       let iters = 0;
@@ -179,7 +183,7 @@ router.post('/auto-process', async (req, res) => {
           await query(
             `INSERT INTO transactions (description, amt, type, cat, date, note, acc_id, user_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [encrypt(decrypt(t.description)), t.amt, actualType, encrypt(decrypt(t.cat)), currentFormatDate, encrypt(newNote), t.acc_id, req.user.id]
+            [encrypt(decrypt(t.description)), t.amt, encryptDeterministic(actualType), encrypt(decrypt(t.cat)), currentFormatDate, encrypt(newNote), t.acc_id, req.user.id]
           );
           processedCount++;
         }
@@ -247,7 +251,7 @@ router.post('/', rules, async (req, res) => {
     const r = await query(
       `INSERT INTO transactions (description,amt,type,cat,date,note,acc_id,rec,freq,cnt,end_date,user_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [encrypt(desc), parseFloat(amt), type, encrypt(cat), date, note ? encrypt(note) : null, acc_id||null, !!rec, freq||null, cnt||null, end_date||null, req.user.id]
+      [encrypt(desc), parseFloat(amt), encryptDeterministic(type), encrypt(cat), date, note ? encrypt(note) : null, acc_id||null, !!rec, freq||null, cnt||null, end_date||null, req.user.id]
     );
     res.status(201).json(decryptRow(r.rows[0]));
   } catch (e) { res.status(500).json({ error: 'Gagal menyimpan transaksi.' }); }
@@ -266,7 +270,7 @@ router.put('/:id', [param('id').isInt(), ...rules], async (req, res) => {
       `UPDATE transactions SET description=$1,amt=$2,type=$3,cat=$4,date=$5,
        note=$6,acc_id=$7,rec=$8,freq=$9,cnt=$10,end_date=$11
        WHERE id=$12 AND user_id=$13 RETURNING *`,
-      [encrypt(desc), parseFloat(amt), type, encrypt(cat), date, note ? encrypt(note) : null, acc_id||null, !!rec,
+      [encrypt(desc), parseFloat(amt), encryptDeterministic(type), encrypt(cat), date, note ? encrypt(note) : null, acc_id||null, !!rec,
        freq||null, cnt||null, end_date||null, parseInt(req.params.id), req.user.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Transaksi tidak ditemukan.' });
