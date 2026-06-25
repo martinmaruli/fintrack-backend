@@ -42,6 +42,79 @@ router.get('/', async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Gagal memuat transaksi.' }); }
 });
 
+// New menu-specific API routes
+router.get('/dashboard', async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT t.*, a.name AS account_name FROM transactions t
+       LEFT JOIN accounts a ON t.acc_id = a.id AND a.user_id = $1
+       WHERE t.user_id = $1 ORDER BY t.date DESC, t.id DESC LIMIT 50`,
+      [req.user.id]
+    );
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: 'Gagal memuat dashboard.' }); }
+});
+
+router.get('/income', async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT t.*, a.name AS account_name FROM transactions t
+       LEFT JOIN accounts a ON t.acc_id = a.id AND a.user_id = $1
+       WHERE t.user_id = $1 AND t.type = 'pemasukan' ORDER BY t.date DESC, t.id DESC`,
+      [req.user.id]
+    );
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: 'Gagal memuat income.' }); }
+});
+
+router.get('/outcome', async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT t.*, a.name AS account_name FROM transactions t
+       LEFT JOIN accounts a ON t.acc_id = a.id AND a.user_id = $1
+       WHERE t.user_id = $1 AND t.type = 'pengeluaran' ORDER BY t.date DESC, t.id DESC`,
+      [req.user.id]
+    );
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: 'Gagal memuat outcome.' }); }
+});
+
+router.get('/projected-income', async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT t.*, a.name AS account_name FROM transactions t
+       LEFT JOIN accounts a ON t.acc_id = a.id AND a.user_id = $1
+       WHERE t.user_id = $1 AND t.type = 'calon_pemasukan' ORDER BY t.date DESC, t.id DESC`,
+      [req.user.id]
+    );
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: 'Gagal memuat projected income.' }); }
+});
+
+router.get('/projected-outcome', async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT t.*, a.name AS account_name FROM transactions t
+       LEFT JOIN accounts a ON t.acc_id = a.id AND a.user_id = $1
+       WHERE t.user_id = $1 AND t.type = 'calon_pengeluaran' ORDER BY t.date DESC, t.id DESC`,
+      [req.user.id]
+    );
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: 'Gagal memuat projected outcome.' }); }
+});
+
+router.get('/report', async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT t.*, a.name AS account_name FROM transactions t
+       LEFT JOIN accounts a ON t.acc_id = a.id AND a.user_id = $1
+       WHERE t.user_id = $1 ORDER BY t.date DESC, t.id DESC`,
+      [req.user.id]
+    );
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: 'Gagal memuat report.' }); }
+});
+
 router.post('/auto-process', async (req, res) => {
   try {
     const today = req.body.today || new Date(Date.now() + 7 * 3600000).toISOString().split('T')[0];
