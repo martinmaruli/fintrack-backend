@@ -2,7 +2,7 @@ const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const { query } = require('../db');
 const { requireAuth } = require('../middleware/auth');
-const { encrypt, decrypt } = require('../services/encryption');
+const { encrypt, decrypt, encryptDeterministic, decryptDeterministic } = require('../services/encryption');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -20,6 +20,7 @@ router.get('/', async (req, res) => {
     const r = await query('SELECT * FROM accounts WHERE user_id = $1 ORDER BY id', [req.user.id]);
     const accounts = r.rows.map(acc => {
       acc.name = decrypt(acc.name);
+      acc.type = decryptDeterministic(acc.type);
       acc.color = decrypt(acc.color);
       acc.emoji = decrypt(acc.emoji);
       return acc;
@@ -35,11 +36,12 @@ router.post('/', rules, async (req, res) => {
   try {
     const r = await query(
       'INSERT INTO accounts (name,type,color,emoji,init,user_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [encrypt(name), type, encrypt(color||'#4f98a3'), encrypt(emoji||'💳'), parseFloat(init)||0, req.user.id]
+      [encrypt(name), encryptDeterministic(type), encrypt(color||'#4f98a3'), encrypt(emoji||'💳'), parseFloat(init)||0, req.user.id]
     );
     const acc = r.rows[0];
     if (acc) {
       acc.name = decrypt(acc.name);
+      acc.type = decryptDeterministic(acc.type);
       acc.color = decrypt(acc.color);
       acc.emoji = decrypt(acc.emoji);
     }
@@ -54,12 +56,13 @@ router.put('/:id', [param('id').isInt(), ...rules], async (req, res) => {
   try {
     const r = await query(
       'UPDATE accounts SET name=$1,type=$2,color=$3,emoji=$4,init=$5 WHERE id=$6 AND user_id=$7 RETURNING *',
-      [encrypt(name), type, encrypt(color||'#4f98a3'), encrypt(emoji||'💳'), parseFloat(init)||0, parseInt(req.params.id), req.user.id]
+      [encrypt(name), encryptDeterministic(type), encrypt(color||'#4f98a3'), encrypt(emoji||'💳'), parseFloat(init)||0, parseInt(req.params.id), req.user.id]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Akun tidak ditemukan.' });
     const acc = r.rows[0];
     if (acc) {
       acc.name = decrypt(acc.name);
+      acc.type = decryptDeterministic(acc.type);
       acc.color = decrypt(acc.color);
       acc.emoji = decrypt(acc.emoji);
     }

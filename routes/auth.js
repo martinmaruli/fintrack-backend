@@ -140,8 +140,20 @@ router.post('/login', authLimiter, loginRules, async (req, res) => {
   const { email, password } = req.body;
   try {
     const encryptedEmail = encryptDeterministic(email);
-    const result = await query('SELECT id, email, password_hash, is_verified, pin_hash FROM users WHERE email = $1', [encryptedEmail]);
-    const user = result.rows[0];
+    let result = await query('SELECT id, email, password_hash, is_verified, pin_hash FROM users WHERE email = $1', [encryptedEmail]);
+    let user = result.rows[0];
+    
+    // Migration fallback for legacy plaintext emails
+    if (!user) {
+      const plaintextResult = await query('SELECT id, email, password_hash, is_verified, pin_hash FROM users WHERE email = $1', [email]);
+      user = plaintextResult.rows[0];
+      if (user) {
+        // Upgrade legacy email to deterministic ciphertext
+        await query('UPDATE users SET email = $1 WHERE id = $2', [encryptedEmail, user.id]);
+        user.email = encryptedEmail; // Update memory so it decrypts properly below
+      }
+    }
+
     if (user) user.email = decryptDeterministic(user.email);
     const dummy = '$2a$12$dummyhashtopreventtimingattacksxxx';
     const valid = await bcrypt.compare(password, user ? user.password_hash : dummy);
