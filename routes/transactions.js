@@ -7,20 +7,20 @@ const router = express.Router();
 router.use(requireAuth);
 
 const TYPES = ['pemasukan','pengeluaran','calon_pemasukan','calon_pengeluaran'];
-const FREQS = ['daily','weekly','biweekly','monthly','yearly'];
+const FREQS = ['daily','weekly','biweekly','monthly','yearly','minutes'];
 
 const rules = [
   body('desc').trim().notEmpty().withMessage('Deskripsi wajib diisi.').isLength({ max: 200 }).escape(),
   body('amt').isFloat({ min: 0.01 }).withMessage('Jumlah harus lebih dari 0.'),
   body('type').isIn(TYPES).withMessage('Tipe tidak valid.'),
   body('cat').trim().notEmpty().withMessage('Kategori wajib diisi.').isLength({ max: 100 }).escape(),
-  body('date').isDate().withMessage('Format tanggal tidak valid.'),
+  body('date').isISO8601().withMessage('Format tanggal tidak valid.'),
   body('note').optional().trim().isLength({ max: 500 }).escape(),
   body('acc_id').optional({ nullable: true }).isInt({ min: 1 }),
   body('rec').optional().isBoolean(),
   body('freq').optional({ nullable: true }).isIn([null, ...FREQS]),
   body('cnt').optional({ nullable: true }).isLength({ max: 10 }),
-  body('end_date').optional({ nullable: true }).isDate(),
+  body('end_date').optional({ nullable: true }).isISO8601(),
 ];
 
 router.get('/', async (req, res) => {
@@ -37,7 +37,7 @@ router.get('/', async (req, res) => {
 
 router.post('/auto-process', async (req, res) => {
   try {
-    const today = req.body.today || new Date(Date.now() + 7 * 3600000).toISOString().split('T')[0];
+    const today = req.body.today || new Date(Date.now() + 7 * 3600000).toISOString();
     const r = await query(
       `SELECT * FROM transactions
        WHERE user_id = $1 AND type IN ('calon_pemasukan', 'calon_pengeluaran')
@@ -49,7 +49,7 @@ router.post('/auto-process', async (req, res) => {
     
     const formatDate = (d) => {
       const dt = new Date(d);
-      return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+      return dt.toISOString();
     };
 
     for (let t of r.rows) {
@@ -82,6 +82,7 @@ router.post('/auto-process', async (req, res) => {
           else if (t.freq === 'biweekly') dt.setDate(dt.getDate() + 14);
           else if (t.freq === 'yearly') dt.setFullYear(dt.getFullYear() + 1);
           else if (t.freq === 'daily') dt.setDate(dt.getDate() + 1);
+          else if (t.freq === 'minutes') dt.setMinutes(dt.getMinutes() + 1);
           else { deleteIt = true; break; } // safety fallback
 
           currentFormatDate = formatDate(dt);
