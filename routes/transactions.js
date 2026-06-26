@@ -24,7 +24,15 @@ const rules = [
   body('amt').isFloat({ min: 0.01 }).withMessage('Jumlah harus lebih dari 0.'),
   body('type').isIn(TYPES).withMessage('Tipe tidak valid.'),
   body('cat').trim().notEmpty().withMessage('Kategori wajib diisi.').isLength({ max: 100 }).escape(),
-  body('date').isDate().withMessage('Format tanggal tidak valid.'),
+  body('date').isDate().withMessage('Format tanggal tidak valid.').custom((value, { req }) => {
+    if (req.body.type === 'pemasukan' || req.body.type === 'pengeluaran') {
+      const today = new Date(Date.now() + 7 * 3600000).toISOString().split('T')[0];
+      if (value > today) {
+        throw new Error('Tanggal tidak boleh lebih dari hari ini untuk tipe transaksi ini.');
+      }
+    }
+    return true;
+  }),
   body('note').optional().trim().isLength({ max: 500 }).escape(),
   body('acc_id').optional({ nullable: true }).isInt({ min: 1 }),
   body('rec').optional().isBoolean(),
